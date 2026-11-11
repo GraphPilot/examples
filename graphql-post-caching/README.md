@@ -51,6 +51,8 @@ One origin, two endpoints:
    runs the resolvers.
 2. **Through GraphPilot**: `https://<subdomain>.<label>.graphpilot.cloud/graphql`. GraphPilot
    answers repeated queries from its edge cache and purges cached responses after a mutation.
+   GraphPilot only reaches public URLs, so a free tunnel (ngrok or Cloudflare) puts the local
+   origin on one; see [step 1](#1-make-the-origin-reachable-from-the-internet).
 
 The origin contains no caching code. Everything GraphPilot needs is declarative: cache hints in
 [`origin/schema.graphql`](origin/schema.graphql) and one setting in
@@ -165,36 +167,90 @@ GraphPilot documentation.
 This uses only documented GraphPilot features and the `gpilot` CLI. The full walkthrough is the
 [GraphQL quickstart](https://docs.graphpilot.io/getting-started/quickstart/).
 
-### 1. Make the origin reachable
+### 1. Make the origin reachable from the internet
 
-GraphPilot connects to your origin over the internet; `127.0.0.1` on your laptop is not
-reachable. Either run `npm run origin` on a server (with `HOST=0.0.0.0`) behind HTTPS, or expose
-your local origin through a tunnel such as Cloudflare Tunnel or ngrok. Note the resulting base
-URL, for example `https://books-origin.example.com`.
+GraphPilot connects to your origin over the internet. Its edge cannot reach a private or local
+address such as `127.0.0.1` or `localhost`, and GraphPilot does not deploy a new service whose
+origin is on one.
+The fastest way to put the local origin on a public HTTPS URL is a free tunnel. Keep
+`npm run origin` running in one terminal and start one of these in a second terminal.
 
-The comparison needs the direct endpoint to be the **same running origin** GraphPilot forwards
-to, so both see the same data.
+**Option A: ngrok (free account, stable URL).** Recommended, because the URL stays the same, so
+the GraphPilot service never has to change. Sign up at [ngrok.com](https://ngrok.com/), install
+the agent (`brew install ngrok` on macOS) and add your authtoken from the ngrok dashboard once:
 
-### 2. Install the CLI and log in
+```bash
+ngrok config add-authtoken <your-authtoken>
+npm run tunnel:ngrok        # runs: ngrok http 4000 --url https://
+```
 
-Create an account at [cockpit.graphpilot.io](https://cockpit.graphpilot.io/signup), then:
+`--url https://` gives the tunnel your account's free dev domain, a stable hostname. ngrok
+prints it as `Forwarding https://<your-dev-domain> -> http://localhost:4000`.
+
+**Option B: Cloudflare quick tunnel (no account).** Install `cloudflared` (`brew install
+cloudflared` on macOS), then:
+
+```bash
+npm run tunnel:cloudflare   # runs: cloudflared tunnel --url http://localhost:4000
+```
+
+It prints a random `https://<words>.trycloudflare.com` URL. The hostname **changes every time**
+you start the tunnel, see [when the tunnel URL changes](#when-the-tunnel-url-changes). Quick
+tunnels are meant for testing: no uptime guarantee and at most 200 requests in flight.
+
+Either way, check the public URL before you go on. It must answer exactly like the local origin,
+and the request appears in the origin's log:
+
+```bash
+curl https://<your-tunnel-host>/graphql \
+  -H 'content-type: application/json' \
+  --data '{"query":"{ books { id title author } }"}'
+```
+
+> [!WARNING]
+> The tunnel makes the origin public. Anyone who knows the URL can call it, including
+> `updateBook`. The data is in memory and resets on restart, but stop the tunnel (Ctrl+C) when
+> the demo is over.
+
+If you would rather run the origin on a server, start it there with `HOST=0.0.0.0 npm run origin`
+behind HTTPS and use that URL instead.
+
+### 2. Install the CLI, log in and create an organization
+
+Create an account at [cockpit.graphpilot.io](https://cockpit.graphpilot.io/signup), then install
+the CLI and log in:
 
 ```bash
 brew install graphpilot/tap/gpilot     # other platforms: https://docs.graphpilot.io/cli/installation/
 gpilot auth login
 ```
 
+Every service belongs to an **organization**, so create one before the service, unless you
+already belong to one:
+
+```bash
+gpilot organization create --name "Book Demo"
+```
+
+In a terminal, the command asks you to confirm that you use GraphPilot for business purposes and
+to accept the Terms of Service and the Data Processing Agreement; answering no creates nothing.
+If you already belong to an organization, select it instead with
+`gpilot organization select <slug>` (`gpilot organization list` shows the slugs). In the portal,
+the same is **New organization**.
+
 ### 3. Create the service
+
+Use the base URL of your tunnel, **without** `/graphql`: GraphPilot forwards the path the client
+sent.
 
 ```bash
 gpilot service create --name "Book Demo" --subdomain book-demo \
-  --url https://books-origin.example.com --no-deploy
+  --url https://<your-tunnel-host> --no-deploy
 gpilot service select book-demo
 ```
 
-`--url` is the origin's base URL without `/graphql`: GraphPilot forwards the path the client
-sent. The command prints the service's signing key **once**; store it in your secret manager if
-you want to verify request signatures later (see
+The command prints the service's signing key **once**; store it in your secret manager if you
+want to verify request signatures later (see
 [what the demo does not cover](#what-the-demo-does-not-cover)).
 
 ### 4. Deploy the schema and the config
@@ -222,13 +278,30 @@ When the deployment is live, the service answers at
 hostname label, which the portal shows. Going live usually takes a few minutes; for an
 organization's first service it can take up to an hour while its certificate is issued.
 
+### When the tunnel URL changes
+
+GraphPilot sends each request to the origin URL of the service's live deployment. With a
+Cloudflare quick tunnel, or a new ngrok domain, update the service and deploy again, so a new
+deployment picks up the new URL:
+
+```bash
+gpilot service edit book-demo --url https://<new-tunnel-host>
+gpilot deploy --schema origin/schema.graphql --config graphpilot/gpilot.toml
+```
+
+Until then, requests through GraphPilot that are not served from the cache fail, because they go
+to the old, closed tunnel.
+
 ## Compare the two endpoints
 
 ```bash
-export ORIGIN_URL=https://books-origin.example.com/graphql
 export GRAPHPILOT_URL=https://book-demo.<label>.graphpilot.cloud/graphql
 npm run compare
 ```
+
+The direct endpoint defaults to `http://127.0.0.1:4000/graphql`: the same running origin your
+tunnel forwards to, so both endpoints see the same data. If the origin runs elsewhere, set
+`ORIGIN_URL` as well.
 
 [`graphpilot/compare.sh`](graphpilot/compare.sh) sends the same requests to both endpoints and
 prints the HTTP status, `gp-cache`, the timing, the entry's age and remaining freshness, the
@@ -379,6 +452,19 @@ a moment, or raise `PURGE_WAIT_SECONDS`.
 
 **Step 5 shows the new title through GraphPilot.** `ORIGIN_URL` is not the origin GraphPilot
 forwards to, or the step ran after the entry expired. Point both at the same running origin.
+
+**`gpilot service create` says the origin is on a private address.** The `--url` points at
+`localhost`, `127.0.0.1` or another private address. Use the public tunnel URL from
+[step 1](#1-make-the-origin-reachable-from-the-internet).
+
+**Requests through GraphPilot fail after restarting the tunnel.** A Cloudflare quick tunnel gets a
+new hostname on every start, and the service still points at the old one. See
+[when the tunnel URL changes](#when-the-tunnel-url-changes), or use ngrok's stable dev domain.
+
+**The tunnel URL answers with an error or an HTML page.** Check that `npm run origin` is running
+on port 4000 and that you call the `/graphql` path. On ngrok's free plan, browsers get a warning
+page before the first visit to the domain; requests from `curl`, scripts and IDE HTTP clients do
+not.
 
 **HTTP `500` with `unknown domain` right after the first deployment.** The hostname is not yet
 served by every edge location. Retry after a few minutes.
