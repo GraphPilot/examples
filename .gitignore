@@ -147,3 +147,6 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# JetBrains IDE project settings (personal, not part of the examples)
+.idea/
