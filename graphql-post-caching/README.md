@@ -1,3 +1,12 @@
+<p align="center">
+  <a href="https://graphpilot.io/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../.github/assets/logo_plane_name_dark.png">
+      <img src="../.github/assets/logo_plane_name_light.png" alt="GraphPilot" width="280">
+    </picture>
+  </a>
+</p>
+
 # GraphQL POST response caching
 
 A runnable, dependency-light example of caching GraphQL `POST` responses with a small in-memory

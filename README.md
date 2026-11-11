@@ -1,3 +1,12 @@
+<p align="center">
+  <a href="https://graphpilot.io/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset=".github/assets/logo_plane_name_dark.png">
+      <img src=".github/assets/logo_plane_name_light.png" alt="GraphPilot" width="280">
+    </picture>
+  </a>
+</p>
+
 # examples
 Practical GraphQL caching examples, runnable demos, and integration guides for GraphPilot.
 
