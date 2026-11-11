@@ -1,0 +1,35 @@
+# Render Blueprint for the "Deploy to Render" button in graphql-post-caching/README.md.
+#
+# It deploys ONLY the Book GraphQL origin (graphql-post-caching/origin/): a plain GraphQL Yoga
+# server with no cache in it, to put behind GraphPilot. The educational in-memory cache in
+# graphql-post-caching/educational-cache/ is not deployed.
+#
+# Reference: https://render.com/docs/blueprint-spec
+# The Deploy to Render button reads render.yaml from the repository root, so this file lives
+# here and points into the example folder with rootDir.
+
+services:
+  - type: web
+    name: graphpilot-book-origin
+    runtime: node
+    plan: free
+    rootDir: graphql-post-caching
+    buildCommand: npm ci
+    startCommand: npm run origin
+    healthCheckPath: /health
+    # Every instance created from the button is the visitor's own copy. Pushes to this
+    # repository must not redeploy (and so reset) those instances.
+    autoDeployTrigger: "off"
+    envVars:
+      # Render web services must listen on 0.0.0.0. PORT is provided by Render (default 10000).
+      - key: HOST
+        value: 0.0.0.0
+      # Render's load balancer sits in front of the service. Count the request limit per address
+      # in the last X-Forwarded-For entry (the one the proxy added) instead of per proxy
+      # connection; without that header, the connection address counts.
+      - key: TRUST_PROXY
+        value: "true"
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "120"
+      - key: MAX_BODY_BYTES
+        value: "16384"

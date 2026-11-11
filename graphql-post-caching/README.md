@@ -22,6 +22,7 @@ videos.
 
 ## Contents
 
+- [Try it yourself](#try-it-yourself)
 - [Architecture](#architecture)
 - [Quick start: the origin on its own](#quick-start-the-origin-on-its-own)
 - [The Book API](#the-book-api)
@@ -32,6 +33,120 @@ videos.
 - [Troubleshooting](#troubleshooting)
 - [Tests](#tests)
 - [The educational cache](#the-educational-cache)
+
+## Try it yourself
+
+Four ways to run the Book origin, from "edit it in the browser" to "give GraphPilot a public
+URL":
+
+| Option | Where it runs | Public URL GraphPilot can use | Accounts | Best for |
+| --- | --- | --- | --- | --- |
+| [Open in StackBlitz](#open-in-stackblitz) | Inside your browser tab | **No** | None | Reading and changing the code, books and resolvers without installing anything |
+| [Deploy to Render](#deploy-to-render) | Render's Free plan | **Yes** | Render | A public origin for GraphPilot in a few clicks, without your laptop |
+| [Run locally](#quick-start-the-origin-on-its-own) | Your machine | Only with a tunnel | ngrok, or none for a Cloudflare quick tunnel | Development, the demo videos, `npm run compare` |
+| [Connect your own origin](#connect-your-own-origin-to-graphpilot) | Wherever your origin runs | Yes, if it is on the internet | GraphPilot | Putting GraphPilot in front of any of the above |
+
+Whichever you choose, the data lives in memory: every instance starts with the same four books,
+mutations change only that instance, and a restart resets it.
+
+### Open in StackBlitz
+
+[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/GraphPilot/examples/tree/main/graphql-post-caching)
+
+StackBlitz imports this folder from GitHub, installs the dependencies and starts the origin with
+`npm run origin` (configured in [`.stackblitzrc`](.stackblitzrc)). Then:
+
+- Open the preview and go to `/graphql` for GraphiQL, or run the [example requests](#the-book-api)
+  with `curl` in a second terminal.
+- Change the books in [`origin/data.js`](origin/data.js), the schema in
+  [`origin/schema.graphql`](origin/schema.graphql) or the resolvers in
+  [`origin/schema.js`](origin/schema.js), then restart the server in the terminal (Ctrl+C,
+  `npm run origin`).
+
+StackBlitz runs Node.js inside your browser tab (WebContainers). The server is not on the
+internet, so **GraphPilot cannot use it as its origin**. To try GraphPilot, use Render, a tunnel
+from your machine, or your own server.
+
+### Deploy to Render
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/GraphPilot/examples)
+
+The button creates the Book origin in your own Render account from the
+[`render.yaml`](../render.yaml) Blueprint at the repository root. It deploys **only the origin**
+(`graphql-post-caching/origin/`), not the educational cache:
+
+| Blueprint setting | Value | Why |
+| --- | --- | --- |
+| `plan` | `free` | Render's Free instance type |
+| `rootDir` | `graphql-post-caching` | The example lives in a subfolder of this repository |
+| `buildCommand`, `startCommand` | `npm ci`, `npm run origin` | Installs from the lockfile, starts the origin |
+| `HOST` | `0.0.0.0` | Render web services must listen on all interfaces; `PORT` is set by Render |
+| `healthCheckPath` | `/health` | GraphQL Yoga's built-in health check |
+| `autoDeployTrigger` | `off` | Your instance does not redeploy, and reset, when this repository changes |
+| `TRUST_PROXY`, `RATE_LIMIT_PER_MINUTE`, `MAX_BODY_BYTES` | `true`, `120`, `16384` | Request limits per client, see [public demo safety](#public-demo-safety) |
+
+When the deploy has finished, the service page in the Render Dashboard shows its
+`onrender.com` URL. Your GraphQL endpoint is that URL plus `/graphql`; open it in a browser for
+GraphiQL, or check it with:
+
+```bash
+curl https://<your-service>.onrender.com/graphql \
+  -H 'content-type: application/json' \
+  --data '{"query":"{ books { id title author } }"}'
+```
+
+Things to know about the Free plan:
+
+- **It sleeps.** Render spins a Free web service down after 15 minutes without traffic, and the
+  next request takes about a minute while it starts again. Wake it up with one request before
+  a demo.
+- **It forgets.** Spinning down, restarting or redeploying resets the books to the seed data.
+- **To change the code**, fork this repository and deploy your fork: use
+  `https://render.com/deploy?repo=https://github.com/<you>/examples` as the button link, or
+  **New > Blueprint** in the Render Dashboard.
+
+The Render URL is public, so it works as a GraphPilot origin: continue with
+[connect your own origin](#connect-your-own-origin-to-graphpilot) and use
+`https://<your-service>.onrender.com` as `--url`.
+
+### Connect your own origin to GraphPilot
+
+GraphPilot needs an origin on a public URL. Pick one:
+
+| Origin | URL for `gpilot service create --url` | Does the URL change? |
+| --- | --- | --- |
+| Render (above) | `https://<your-service>.onrender.com` | No, it belongs to the Render service |
+| Local + ngrok (`npm run tunnel:ngrok`) | `https://<your-dev-domain>` | No, the dev domain is stable |
+| Local + Cloudflare quick tunnel (`npm run tunnel:cloudflare`) | `https://<words>.trycloudflare.com` | Yes, on every tunnel start |
+| Your own server (`HOST=0.0.0.0 npm run origin` behind HTTPS) | Your server's URL | Only when you change it |
+
+Then follow [put GraphPilot in front of the origin](#put-graphpilot-in-front-of-the-origin):
+create an organization and a service with that URL, deploy `origin/schema.graphql` and
+`graphpilot/gpilot.toml`, and run `npm run compare` or the requests in
+[`requests/book-demo.http`](requests/book-demo.http).
+
+### Public demo safety
+
+An origin on a public URL can be called by anyone who knows the URL. The demo is built for that:
+
+- **Mutations are allowed** and change only that one instance. Nothing is shared between
+  instances, and a restart resets the data.
+- **Request limits**: request bodies above 16 KiB are refused with `413`, more than 120 requests
+  per minute from one client with `429`, and titles longer than 200 characters with a GraphQL
+  error. The schema has no nested types, so query depth is bounded by design. All limits are
+  [settings](#quick-start-the-origin-on-its-own).
+- **No credentials.** The origin needs no GraphPilot account, API key or signing key, and none
+  is stored in this repository or in `render.yaml`. If you add
+  [request signature verification](https://docs.graphpilot.io/security/request-signing/), set
+  the signing key as a secret environment variable in your hosting platform, never in a
+  committed file.
+
+The request limit counts per client address, which changes behind GraphPilot: GraphPilot
+[removes forwarding headers such as `X-Forwarded-For`](https://docs.graphpilot.io/reference/headers/)
+and writes none, so the origin sees the address of the GraphPilot edge, and all visitors who
+reach it through that edge share one limit. Cache `HIT`s never reach the origin, so only misses,
+passes and mutations count. For a busy public demo behind GraphPilot, raise
+`RATE_LIMIT_PER_MINUTE` or set it to `0`.
 
 ## Architecture
 
@@ -71,8 +186,12 @@ npm run origin
 
 ```text
 Book GraphQL origin: http://127.0.0.1:4000/graphql  (no cache in front)
-Origin delay 0 ms. Data is in memory; restart to reset it. Ctrl+C to stop.
+Listening on 127.0.0.1:4000. Origin delay 0 ms, body limit 16384 bytes, 120 requests per minute per client.
+Data is in memory; restart to reset it. Ctrl+C to stop.
 ```
+
+Open `http://127.0.0.1:4000/graphql` in a browser for GraphiQL, an in-browser editor to send
+queries and mutations.
 
 In a second terminal:
 
@@ -100,6 +219,9 @@ log. That is the simplest way to see a cache `HIT` on camera.
 | `PORT` | `4000` | Port of the origin |
 | `HOST` | `127.0.0.1` | Interface to bind to. Use `0.0.0.0` when the origin runs on a server or in a container |
 | `ORIGIN_DELAY_MS` | `0` | Artificial latency per request. `400` makes the difference between the origin and a cache `HIT` easy to see |
+| `MAX_BODY_BYTES` | `16384` | Largest accepted request body. Larger requests are refused with `413` |
+| `RATE_LIMIT_PER_MINUTE` | `120` | Requests per minute and client address. More are refused with `429` and `Retry-After: 60`. `0` switches the limit off |
+| `TRUST_PROXY` | `false` | `true` counts the limit per address in the **last** `X-Forwarded-For` entry, the one the proxy directly in front of the origin added; earlier entries can come from the client and are ignored. Set it only behind a proxy, such as Render's load balancer. Without the header, the connection address counts |
 
 ## The Book API
 
@@ -212,8 +334,13 @@ curl https://<your-tunnel-host>/graphql \
 > `updateBook`. The data is in memory and resets on restart, but stop the tunnel (Ctrl+C) when
 > the demo is over.
 
-If you would rather run the origin on a server, start it there with `HOST=0.0.0.0 npm run origin`
-behind HTTPS and use that URL instead.
+**Option C: Render (no laptop needed).** [Deploy to Render](#deploy-to-render) gives the origin
+a public `onrender.com` URL. Use it instead of a tunnel URL in the steps below; the comparison
+then needs `ORIGIN_URL=https://<your-service>.onrender.com/graphql`, because the direct
+endpoint has to be the same running origin.
+
+If you would rather run the origin on a server of your own, start it there with
+`HOST=0.0.0.0 npm run origin` behind HTTPS and use that URL instead.
 
 ### 2. Install the CLI, log in and create an organization
 
@@ -484,6 +611,7 @@ npm test
 | File | Covers |
 | --- | --- |
 | `test/origin.test.js` | The origin on its own: the Book queries and mutation, every request reaching it, no `Set-Cookie` or `Cache-Control`, and the `@cacheControl` hint and `id` field in `origin/schema.graphql` |
+| `test/origin-limits.test.js` | The public demo safeguards: `413` above the body limit, `429` above the request limit (and that `X-Forwarded-For` cannot dodge it), the title length, `/` redirecting to GraphiQL, `/health`, and the environment settings Render uses |
 | `test/requests.test.js` | Every request in `requests/book-demo.http` and every operation in `requests/operations/` is valid against the schema and runs against the origin without errors |
 | `test/educational-cache/*.test.js` | The educational cache, see its README |
 
@@ -508,7 +636,9 @@ npm run educational:demo   # walk through every scenario
 | --- | --- |
 | `origin/schema.graphql` | The Book schema, served by Yoga and deployed to GraphPilot |
 | `origin/schema.js`, `origin/data.js` | Resolvers and in-memory seed data |
-| `origin/create-origin.js`, `origin/server.js` | The GraphQL Yoga origin and its entry point (`npm run origin`) |
+| `origin/create-origin.js`, `origin/server.js` | The GraphQL Yoga origin and its entry point (`npm run origin`), with the request limits |
+| `.stackblitzrc` | Start command for [Open in StackBlitz](#open-in-stackblitz) |
+| `../render.yaml` | Render Blueprint for [Deploy to Render](#deploy-to-render), at the repository root because the button reads it there |
 | `graphpilot/gpilot.toml` | GraphPilot service configuration |
 | `graphpilot/compare.sh` | Direct versus GraphPilot comparison (`npm run compare`) |
 | `requests/` | Ready-made requests for the IDE: `book-demo.http` and `operations/*.graphql` |

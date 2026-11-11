@@ -1,0 +1,7 @@
+{
+  "installDependencies": true,
+  "startCommand": "npm run origin",
+  "env": {
+    "HOST": "0.0.0.0"
+  }
+}

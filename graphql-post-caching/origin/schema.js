@@ -9,6 +9,8 @@ import { createSchema } from 'graphql-yoga';
 
 export const typeDefs = readFileSync(new URL('./schema.graphql', import.meta.url), 'utf8');
 
+const MAX_TITLE_LENGTH = 200;
+
 export const resolvers = {
   Query: {
     books: (_parent, { category }, { store }) => store.list(category),
@@ -18,6 +20,13 @@ export const resolvers = {
     updateBook(_parent, { id, title }, { store }) {
       if (title.trim() === '') {
         throw new GraphQLError('title must not be empty', { extensions: { code: 'BAD_USER_INPUT' } });
+      }
+      // The origin may run on a public URL where anyone can send mutations:
+      // keep what one request can store small.
+      if (title.length > MAX_TITLE_LENGTH) {
+        throw new GraphQLError(`title must be at most ${MAX_TITLE_LENGTH} characters`, {
+          extensions: { code: 'BAD_USER_INPUT' },
+        });
       }
       const book = store.updateTitle(id, title);
       if (!book) {
