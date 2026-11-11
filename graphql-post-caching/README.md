@@ -234,6 +234,9 @@ gpilot organization create --name "Book Demo"
 
 In a terminal, the command asks you to confirm that you use GraphPilot for business purposes and
 to accept the Terms of Service and the Data Processing Agreement; answering no creates nothing.
+In a script or CI, where nobody can answer, you give both declarations as flags instead:
+`gpilot organization create --name "Book Demo" --confirm-business --accept-terms`. When no
+organization is selected yet, the new one is selected automatically.
 If you already belong to an organization, select it instead with
 `gpilot organization select <slug>` (`gpilot organization list` shows the slugs). In the portal,
 the same is **New organization**.
