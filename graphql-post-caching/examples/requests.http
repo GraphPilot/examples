@@ -1,0 +1,75 @@
+# Requests for the VS Code REST Client or JetBrains HTTP Client.
+# Start the demo first: npm start
+# Send them in order and watch the x-cache response headers.
+
+@proxy = http://127.0.0.1:4000/graphql
+@origin = http://127.0.0.1:4001/graphql
+
+### 1. All books: MISS the first time, HIT the second time
+POST {{proxy}}
+Content-Type: application/json
+
+{
+  "query": "{ books { id title author } }"
+}
+
+### 2. One book by id: change the variable to get a separate cache entry
+POST {{proxy}}
+Content-Type: application/json
+
+{
+  "query": "query Book($id: ID!) { book(id: $id) { id title author } }",
+  "variables": { "id": "1" }
+}
+
+### 3. Authenticated request: always BYPASS (demo token, not a real secret)
+POST {{proxy}}
+Content-Type: application/json
+Authorization: Bearer demo-token-alice
+
+{
+  "query": "{ books { id title author } }"
+}
+
+### 4. Update book 1 through the cache: BYPASS, invalidates cached entries containing book 1
+POST {{proxy}}
+Content-Type: application/json
+
+{
+  "query": "mutation { updateBook(id: \"1\", title: \"Updated Book Title\") { id title } }"
+}
+
+### 5. Update book 1 directly at the origin: the cache does not notice (stale HIT afterwards)
+POST {{origin}}
+Content-Type: application/json
+
+{
+  "query": "mutation { updateBook(id: \"1\", title: \"Changed Behind The Cache\") { id title } }"
+}
+
+### 6. The same read with the HTTP QUERY method (RFC 10008), shares the entry of request 1
+QUERY {{proxy}}
+Content-Type: application/json
+
+{
+  "query": "{ books { id title author } }"
+}
+
+### 7. A mutation over QUERY: rejected with 405
+QUERY {{proxy}}
+Content-Type: application/json
+
+{
+  "query": "mutation { updateBook(id: \"1\", title: \"Updated Book Title\") { id title } }"
+}
+
+### 8. Introspection: BYPASS
+POST {{proxy}}
+Content-Type: application/json
+
+{
+  "query": "{ __schema { queryType { name } } }"
+}
+
+### 9. Cache statistics
+GET http://127.0.0.1:4000/_cache/stats
