@@ -1,9 +1,9 @@
 // Shared test setup: an in-process origin, the caching proxy in front of it,
 // a fake clock, and a counter of requests that reached the origin.
 
-import { createCachingProxy } from '../src/cache/handler.js';
-import { createOrigin } from '../src/origin.js';
-import { schema } from '../src/schema.js';
+import { createCachingProxy } from '../../educational-cache/cache/handler.js';
+import { createOrigin } from '../../origin/create-origin.js';
+import { schema } from '../../origin/schema.js';
 
 export const BOOKS_QUERY = '{ books { id title author } }';
 
@@ -25,7 +25,7 @@ export function createTestEnv({ ttlSeconds = 30, maxEntries = 100, policy } = {}
   });
 
   /** Sends a GraphQL request through the cache proxy. */
-  async function send(payload, { method = 'POST', headers = {}, host = 'localhost:4000' } = {}) {
+  async function send(payload, { method = 'POST', headers = {}, host = 'localhost:4100' } = {}) {
     const response = await proxy.handle(
       new Request(`http://${host}/graphql`, {
         method,
@@ -45,7 +45,7 @@ export function createTestEnv({ ttlSeconds = 30, maxEntries = 100, policy } = {}
 
   /** Sends a request straight to the origin, bypassing the cache. */
   async function sendToOrigin(payload) {
-    const response = await yoga.fetch('http://localhost:4001/graphql', {
+    const response = await yoga.fetch('http://localhost:4101/graphql', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),

@@ -1,9 +1,9 @@
 # Requests for the VS Code REST Client or JetBrains HTTP Client.
-# Start the demo first: npm start
+# EDUCATIONAL cache only (not GraphPilot). Start it first: npm run educational
 # Send them in order and watch the x-cache response headers.
 
-@proxy = http://127.0.0.1:4000/graphql
-@origin = http://127.0.0.1:4001/graphql
+@proxy = http://127.0.0.1:4100/graphql
+@origin = http://127.0.0.1:4101/graphql
 
 ### 1. All books: MISS the first time, HIT the second time
 POST {{proxy}}
@@ -72,4 +72,4 @@ Content-Type: application/json
 }
 
 ### 9. Cache statistics
-GET http://127.0.0.1:4000/_cache/stats
+GET http://127.0.0.1:4100/_cache/stats

@@ -1,0 +1,45 @@
+# The Book API schema.
+#
+# This one file is both:
+#   - the schema GraphQL Yoga serves (origin/schema.js loads it), and
+#   - the schema deployed to GraphPilot (gpilot deploy --schema origin/schema.graphql).
+#
+# @cacheControl is a cache hint in the format of Apollo's cache control
+# plugin. GraphQL Yoga ignores it; the directive is declared here so the
+# schema stays valid for Yoga. GraphPilot reads it from this file to decide
+# how long a response may be cached and who may share it. See
+# https://docs.graphpilot.io/connect/graphql-yoga/
+
+enum CacheControlScope {
+  PUBLIC
+  PRIVATE
+}
+
+directive @cacheControl(
+  maxAge: Int
+  scope: CacheControlScope
+  inheritMaxAge: Boolean
+  swr: Int
+) on FIELD_DEFINITION | OBJECT | INTERFACE | UNION
+
+"A book. The same for every client, so cached as PUBLIC for 30 seconds."
+type Book @cacheControl(maxAge: 30, scope: PUBLIC) {
+  id: ID!
+  title: String!
+  author: String!
+  category: String!
+  "Price in cents"
+  price: Int!
+}
+
+type Query {
+  "All books, or the books of one category."
+  books(category: String): [Book!]!
+  "One book, or null when it does not exist."
+  book(id: ID!): Book
+}
+
+type Mutation {
+  "Changes a book's title and returns the changed book."
+  updateBook(id: ID!, title: String!): Book!
+}

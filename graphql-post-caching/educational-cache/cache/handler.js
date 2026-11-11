@@ -1,9 +1,11 @@
+// EDUCATIONAL in-memory cache, not GraphPilot.
+//
 // The caching proxy: sits in front of the GraphQL origin and decides, per
 // request, whether to serve from cache (HIT), fetch and store (MISS), or pass
 // straight through (BYPASS).
 //
 // It speaks the Fetch API (Request in, Response out), so the same code runs
-// behind node:http (src/server.js) and in-process in the tests.
+// behind node:http (educational-cache/server.js) and in-process in the tests.
 //
 // Diagnostic response headers:
 //   x-cache              HIT | MISS | BYPASS

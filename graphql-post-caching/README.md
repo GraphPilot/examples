@@ -7,119 +7,101 @@
   </a>
 </p>
 
-# GraphQL POST response caching
+# GraphQL POST caching: the Book demo
 
-A runnable, dependency-light example of caching GraphQL `POST` responses with a small in-memory
-cache in front of a GraphQL origin. It accompanies the GraphPilot blog article
-**"How to Cache GraphQL POST Requests: A Practical Guide"**.
+A small Book GraphQL API that you can call **directly** and **through the GraphPilot edge cache**,
+with the same queries, the same mutation and the same data. It accompanies the GraphPilot blog
+article **"How to Cache GraphQL POST Requests: A Practical Guide"** and the GraphPilot demo
+videos.
 
-The example shows what a GraphQL-aware cache has to get right, and where a hand-written cache
-reaches its limits:
-
-- deterministic cache keys from the parsed operation, its variables and the request context
-- cache HIT, MISS and BYPASS, visible in response headers
-- TTL expiration and a bounded number of entries
-- stale responses, and invalidation after a mutation
-- bypassing authenticated requests, mutations, introspection and error responses
-- the HTTP `QUERY` method ([RFC 10008](https://www.rfc-editor.org/rfc/rfc10008)) next to `POST`
-
-> [!WARNING]
-> This is educational code, not a production-ready cache. It keeps everything in the memory of
-> one process, loses it on restart, and is not shared between instances. See
-> [Limitations](#limitations).
-
-No GraphPilot account is needed. Everything runs locally.
+| Part | Folder | Needs a GraphPilot account |
+| --- | --- | --- |
+| **Book origin**: a plain GraphQL Yoga server, no cache in it | [`origin/`](origin/) | No |
+| **GraphPilot demo**: the same origin behind the real GraphPilot edge cache, plus a script that compares both endpoints | [`graphpilot/`](graphpilot/) | Yes |
+| **Educational cache**: a hand-written in-memory cache for learning how GraphQL caching works. Not GraphPilot, and not used by the GraphPilot demo | [`educational-cache/`](educational-cache/) | No |
 
 ## Contents
 
-- [Quick start](#quick-start)
 - [Architecture](#architecture)
+- [Quick start: the origin on its own](#quick-start-the-origin-on-its-own)
 - [The Book API](#the-book-api)
-- [Walkthrough](#walkthrough)
-- [How the cache decides](#how-the-cache-decides)
-- [Mutation-based invalidation](#mutation-based-invalidation)
-- [GET, POST and QUERY](#get-post-and-query)
-- [Configuration](#configuration)
-- [Tests](#tests)
+- [Put GraphPilot in front of the origin](#put-graphpilot-in-front-of-the-origin)
+- [Compare the two endpoints](#compare-the-two-endpoints)
+- [What the demo does not cover](#what-the-demo-does-not-cover)
 - [Troubleshooting](#troubleshooting)
-- [Limitations](#limitations)
-- [Where a managed GraphQL edge cache fits](#where-a-managed-graphql-edge-cache-fits)
-
-## Quick start
-
-Requirements: Node.js 22.15 or newer (GraphQL Yoga 6 requires it), npm, and `curl` for the
-walkthrough script.
-
-```bash
-cd graphql-post-caching
-npm install
-npm start
-```
-
-```text
-Cache proxy:    http://127.0.0.1:4000/graphql   (send requests here)
-GraphQL origin: http://127.0.0.1:4001/graphql   (bypasses the cache)
-Cache stats:    http://127.0.0.1:4000/_cache/stats
-TTL 30s, max 100 entries, origin delay 0ms. Ctrl+C to stop.
-```
-
-In a second terminal, send the first request twice:
-
-```bash
-curl -i http://127.0.0.1:4000/graphql \
-  -H 'content-type: application/json' \
-  --data '{"query":"{ books { id title author } }"}'
-```
-
-The first response carries `x-cache: MISS`, the second `x-cache: HIT`.
-
-To run every scenario of this README in order:
-
-```bash
-npm run demo
-```
-
-The demo changes book 1, so start it against a freshly started server. To watch an entry expire
-during the demo, start the server with a short TTL: `CACHE_TTL_SECONDS=5 npm start`.
+- [Tests](#tests)
+- [The educational cache](#the-educational-cache)
 
 ## Architecture
 
 ```text
-                       ┌─────────────────────────── one Node.js process ───────────────────────────┐
-                       │                                                                           │
-  client ── POST ────► │  cache proxy :4000  ── POST ──►  GraphQL origin :4001 (GraphQL Yoga)      │
-          ◄─ x-cache ─ │   │                                                                       │
-                       │   └─ in-memory store: bounded LRU, TTL, entity tags                       │
-                       └───────────────────────────────────────────────────────────────────────────┘
+  1. direct, no cache
+  client ── POST /graphql ─────────────────────────────┐
+                                                       ▼
+                                          ┌──────────────────────────┐
+  2. through GraphPilot                   │  Book origin (origin/)   │
+  client ── POST /graphql ─► GraphPilot ─►│  GraphQL Yoga, no cache  │
+         ◄─ gp-cache: MISS / HIT / PASS   └──────────────────────────┘
 ```
 
-- **The origin** (`src/schema.js`, `src/origin.js`) is a plain GraphQL Yoga server with an
-  in-memory list of books. It knows nothing about caching.
-- **The cache proxy** (`src/cache/`) receives every client request, decides HIT, MISS or BYPASS,
-  and forwards to the origin when needed. It uses the origin's schema to parse and validate
-  operations and to understand responses.
-- The origin is also reachable directly on port 4001. The walkthrough uses that to change data
-  behind the cache's back and produce a stale response.
+One origin, two endpoints:
 
-| File | Responsibility |
-| --- | --- |
-| `src/schema.js` | Book schema and resolvers |
-| `src/data.js` | In-memory book store (seed data) |
-| `src/origin.js` | GraphQL Yoga origin |
-| `src/cache/handler.js` | The caching proxy: HIT, MISS, BYPASS, invalidation, diagnostics |
-| `src/cache/analyze.js` | Parses the request and decides whether the operation is cacheable |
-| `src/cache/policy.js` | Allowlist of public fields, optional per-field `maxAge` |
-| `src/cache/key.js` | Deterministic cache keys |
-| `src/cache/entities.js` | Finds `Book` objects in a response, for tagging and invalidation |
-| `src/cache/store.js` | Bounded LRU store with TTL and tag index |
-| `src/http.js`, `src/server.js` | node:http wiring, starts both servers |
-| `examples/` | `curl-walkthrough.sh` and `requests.http` |
-| `test/` | Automated tests (`node:test`) |
+1. **Direct**: `http://127.0.0.1:4000/graphql` (or wherever you run the origin). Every request
+   runs the resolvers.
+2. **Through GraphPilot**: `https://<subdomain>.<label>.graphpilot.cloud/graphql`. GraphPilot
+   answers repeated queries from its edge cache and purges cached responses after a mutation.
+
+The origin contains no caching code. Everything GraphPilot needs is declarative: cache hints in
+[`origin/schema.graphql`](origin/schema.graphql) and one setting in
+[`graphpilot/gpilot.toml`](graphpilot/gpilot.toml).
+
+## Quick start: the origin on its own
+
+Requirements: Node.js 22.15 or newer (GraphQL Yoga 6 requires it) and npm. The comparison script
+also needs `curl` and `bash`.
+
+```bash
+cd graphql-post-caching
+npm install
+npm run origin
+```
+
+```text
+Book GraphQL origin: http://127.0.0.1:4000/graphql  (no cache in front)
+Origin delay 0 ms. Data is in memory; restart to reset it. Ctrl+C to stop.
+```
+
+In a second terminal:
+
+```bash
+curl http://127.0.0.1:4000/graphql \
+  -H 'content-type: application/json' \
+  --data '{"query":"{ books { id title author } }"}'
+```
+
+```json
+{"data":{"books":[{"id":"1","title":"The Pragmatic Programmer","author":"Hunt & Thomas"},{"id":"2","title":"Designing Data-Intensive Applications","author":"Martin Kleppmann"},{"id":"3","title":"Clean Architecture","author":"Robert C. Martin"},{"id":"4","title":"Dune","author":"Frank Herbert"}]}}
+```
+
+The origin logs one line for every request that reaches it:
+
+```text
+13:50:07 POST /graphql reached the origin
+```
+
+A response GraphPilot serves from its cache never reaches the origin, so it never appears in this
+log. That is the simplest way to see a cache `HIT` on camera.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PORT` | `4000` | Port of the origin |
+| `HOST` | `127.0.0.1` | Interface to bind to. Use `0.0.0.0` when the origin runs on a server or in a container |
+| `ORIGIN_DELAY_MS` | `0` | Artificial latency per request. `400` makes the difference between the origin and a cache `HIT` easy to see |
 
 ## The Book API
 
 ```graphql
-type Book {
+type Book @cacheControl(maxAge: 30, scope: PUBLIC) {
   id: ID!
   title: String!
   author: String!
@@ -138,7 +120,9 @@ type Mutation {
 }
 ```
 
-The seed data is the bookshop used in the GraphPilot demo videos:
+The full file, including the `@cacheControl` declaration, is
+[`origin/schema.graphql`](origin/schema.graphql). The seed data is the bookshop from the
+GraphPilot demo videos:
 
 | id | title | author | category |
 | --- | --- | --- | --- |
@@ -147,356 +131,210 @@ The seed data is the bookshop used in the GraphPilot demo videos:
 | 3 | Clean Architecture | Robert C. Martin | software |
 | 4 | Dune | Frank Herbert | scifi |
 
-The data lives in memory. Restart the server to reset it.
+The demo uses these operations:
 
-## Walkthrough
+```graphql
+# The query
+{ books { id title author } }
 
-Every step below is part of `npm run demo`. The outputs are from a real run; cache keys depend on
-host, path, operation and variables, so yours match as long as you use `127.0.0.1:4000`.
+# The mutation
+mutation {
+  updateBook(id: "1", title: "Updated Book Title") {
+    id
+    title
+  }
+}
+```
 
-The requests use these shell variables:
+The data lives in memory. Restart the origin to reset it.
+
+### Why the schema has `@cacheControl`
+
+GraphQL Yoga sends no `Cache-Control` header, so GraphPilot takes the cache policy from
+`@cacheControl` hints in the deployed schema, in the format of Apollo's cache control plugin.
+`Book` is cached for 30 seconds and is `PUBLIC`: every client gets the same answer, so they may
+share one cache entry. `books` and `book` carry no hint of their own and take `Book`'s. Yoga
+itself ignores the directive; it is declared in the schema only so the schema stays valid. See
+[GraphQL Yoga](https://docs.graphpilot.io/connect/graphql-yoga/) and
+[lifetime from the schema](https://docs.graphpilot.io/caching/lifetime/schema/) in the
+GraphPilot documentation.
+
+## Put GraphPilot in front of the origin
+
+This uses only documented GraphPilot features and the `gpilot` CLI. The full walkthrough is the
+[GraphQL quickstart](https://docs.graphpilot.io/getting-started/quickstart/).
+
+### 1. Make the origin reachable
+
+GraphPilot connects to your origin over the internet; `127.0.0.1` on your laptop is not
+reachable. Either run `npm run origin` on a server (with `HOST=0.0.0.0`) behind HTTPS, or expose
+your local origin through a tunnel such as Cloudflare Tunnel or ngrok. Note the resulting base
+URL, for example `https://books-origin.example.com`.
+
+The comparison needs the direct endpoint to be the **same running origin** GraphPilot forwards
+to, so both see the same data.
+
+### 2. Install the CLI and log in
+
+Create an account at [cockpit.graphpilot.io](https://cockpit.graphpilot.io/signup), then:
 
 ```bash
-PROXY=http://127.0.0.1:4000/graphql
-ORIGIN=http://127.0.0.1:4001/graphql
-BOOKS='{"query":"{ books { id title author } }"}'
-UPDATE='{"query":"mutation { updateBook(id: \"1\", title: \"Updated Book Title\") { id title } }"}'
+brew install graphpilot/tap/gpilot     # other platforms: https://docs.graphpilot.io/cli/installation/
+gpilot auth login
 ```
 
-### 1. First request: MISS
+### 3. Create the service
 
 ```bash
-curl -i $PROXY -H 'content-type: application/json' --data "$BOOKS"
+gpilot service create --name "Book Demo" --subdomain book-demo \
+  --url https://books-origin.example.com --no-deploy
+gpilot service select book-demo
 ```
 
-```text
-HTTP/1.1 200 OK
-x-cache: MISS
-x-cache-key: 675f6a613dfae44c
-x-cache-ttl: 30
+`--url` is the origin's base URL without `/graphql`: GraphPilot forwards the path the client
+sent. The command prints the service's signing key **once**; store it in your secret manager if
+you want to verify request signatures later (see
+[what the demo does not cover](#what-the-demo-does-not-cover)).
 
-{"data":{"books":[{"id":"1","title":"The Pragmatic Programmer","author":"Hunt & Thomas"}, ...]}}
-```
+### 4. Deploy the schema and the config
 
-The origin answered, and the response was stored for 30 seconds.
-
-### 2. Identical second request: HIT
-
-Run the same command again:
-
-```text
-HTTP/1.1 200 OK
-age: 0
-x-cache: HIT
-x-cache-key: 675f6a613dfae44c
-x-cache-ttl: 30
-```
-
-The origin was not called. `age` is the entry's age in seconds, `x-cache-ttl` the remaining
-freshness. Reformatting the query (whitespace, comments) still hits the same entry, because the
-key is built from the parsed and re-printed operation, not from the raw string.
-
-### 3. Different variables: separate entries
+From the `graphql-post-caching/` folder:
 
 ```bash
-curl -i $PROXY -H 'content-type: application/json' \
-  --data '{"query":"query Book($id: ID!) { book(id: $id) { id title author } }","variables":{"id":"1"}}'
-curl -i $PROXY -H 'content-type: application/json' \
-  --data '{"query":"query Book($id: ID!) { book(id: $id) { id title author } }","variables":{"id":"2"}}'
+gpilot deploy --schema origin/schema.graphql --config graphpilot/gpilot.toml
 ```
 
-Both are a `MISS` with different keys (`42a458bf276c3cb1` and `c48b63a3191b2e7e`). Repeating the
-first one is a `HIT`. Variable key order does not matter, and `{"id": 1}` and `{"id": "1"}` share
-an entry, because variables are coerced against the schema before they go into the key.
+[`graphpilot/gpilot.toml`](graphpilot/gpilot.toml) changes one default:
 
-### 4. Authenticated request: BYPASS
+```toml
+[response]
+surrogate_key_header = true
+```
+
+It adds the `gp-surrogate-key` response header, so you can see which keys a response is tagged
+with, such as `Book:id:1`. Everything else is GraphPilot's default: GraphQL on `/graphql`, cache
+lifetimes from the schema, an entity key for every object with an `id` field, and the `gp-cache`
+headers.
+
+When the deployment is live, the service answers at
+`https://book-demo.<label>.graphpilot.cloud/graphql`, where `<label>` is your organization's
+hostname label, which the portal shows. Going live usually takes a few minutes; for an
+organization's first service it can take up to an hour while its certificate is issued.
+
+## Compare the two endpoints
 
 ```bash
-curl -i $PROXY -H 'content-type: application/json' \
-  -H 'authorization: Bearer demo-token-alice' --data "$BOOKS"
+export ORIGIN_URL=https://books-origin.example.com/graphql
+export GRAPHPILOT_URL=https://book-demo.<label>.graphpilot.cloud/graphql
+npm run compare
 ```
 
-```text
-HTTP/1.1 200 OK
-x-cache: BYPASS
-x-cache-reason: authenticated
-```
-
-Any request with an `Authorization` or `Cookie` header goes to the origin and its response is
-never stored, even if the origin returns the same data to everyone. `demo-token-alice` is a fake
-value for the demo, not a credential.
-
-### 5. Stale data: change a book behind the cache's back
-
-Send the mutation **directly to the origin** on port 4001, so the cache never sees it:
-
-```bash
-curl -i $ORIGIN -H 'content-type: application/json' --data "$UPDATE"
-```
-
-```text
-{"data":{"updateBook":{"id":"1","title":"Updated Book Title"}}}
-```
-
-Then ask the cache:
-
-```bash
-curl -i $PROXY -H 'content-type: application/json' --data "$BOOKS"
-```
-
-```text
-HTTP/1.1 200 OK
-x-cache: HIT
-{"data":{"books":[{"id":"1","title":"The Pragmatic Programmer", ...
-```
-
-A `HIT` with the old title: the response is **stale**. The cache keeps serving it until the TTL
-ends, because nothing told it that book 1 changed. This is what happens whenever data changes
-through another path: a back-office tool, a batch job, another service.
-
-### 6. Mutation through the cache: invalidation
-
-Send the same mutation **through the cache**:
-
-```bash
-curl -i $PROXY -H 'content-type: application/json' --data "$UPDATE"
-```
-
-```text
-HTTP/1.1 200 OK
-x-cache: BYPASS
-x-cache-invalidated: 2
-x-cache-reason: mutation
-
-{"data":{"updateBook":{"id":"1","title":"Updated Book Title"}}}
-```
-
-The mutation is never cached. Its response contains `Book` 1, so the cache removed both entries
-that contain book 1: the `books` list and the `book(id: "1")` lookup. The `book(id: "2")` entry
-is kept. The next read is a `MISS` with the new title:
-
-```text
-HTTP/1.1 200 OK
-x-cache: MISS
-{"data":{"books":[{"id":"1","title":"Updated Book Title", ...
-```
-
-### 7. The same read with HTTP QUERY
-
-```bash
-curl -i -X QUERY $PROXY -H 'content-type: application/json' --data "$BOOKS"
-```
-
-```text
-HTTP/1.1 200 OK
-x-cache: HIT
-x-cache-key: 675f6a613dfae44c
-```
-
-A `HIT` on the entry the `POST` in step 6 stored: same operation, same key. See
-[GET, POST and QUERY](#get-post-and-query).
-
-### 8. A mutation over QUERY is rejected
-
-```bash
-curl -i -X QUERY $PROXY -H 'content-type: application/json' --data "$UPDATE"
-```
-
-```text
-HTTP/1.1 405 Method Not Allowed
-allow: POST
-x-cache: BYPASS
-x-cache-reason: unsafe-operation-over-query
-
-{"errors":[{"message":"mutation operations must use POST, not QUERY.","extensions":{"code":"METHOD_NOT_ALLOWED"}}]}
-```
-
-### 9. TTL expiration
-
-Start the server with `CACHE_TTL_SECONDS=5 npm start`, send the `books` query, wait six seconds
-and send it again: the second request is a `MISS`, and `/_cache/stats` counts one more
-`expirations`.
-
-### 10. Cache statistics
-
-```bash
-curl http://127.0.0.1:4000/_cache/stats
-```
-
-After `npm run demo` against `CACHE_TTL_SECONDS=5 npm start`:
-
-```json
-{"size":2,"maxEntries":100,"hits":5,"misses":5,"evictions":0,"expirations":1,"invalidations":2}
-```
-
-The proxy also logs one line per request in the terminal running `npm start`:
-
-```text
-[cache] POST MISS key=675f6a613dfae44c stored ttl=30s
-[cache] POST HIT key=675f6a613dfae44c age=0s
-[cache] POST BYPASS authenticated (authorization header)
-[cache] POST BYPASS mutation, invalidated 2 entries
-[cache] QUERY HIT key=675f6a613dfae44c age=0s
-[cache] QUERY rejected: mutation over QUERY
-```
-
-The same requests are in [`examples/requests.http`](examples/requests.http) for the VS Code REST
-Client or the JetBrains HTTP Client.
-
-## How the cache decides
-
-### Diagnostic headers
-
-| Header | Meaning |
-| --- | --- |
-| `x-cache` | `HIT` (served from cache), `MISS` (fetched from the origin, looked up first), `BYPASS` (not eligible, sent straight to the origin) |
-| `x-cache-reason` | Why a request bypassed the cache, or why a `MISS` was not stored (`not-stored:<reason>`) |
-| `x-cache-key` | First 16 hex characters of the SHA-256 cache key |
-| `x-cache-ttl` | Seconds the entry stays fresh |
-| `age` | Seconds since the entry was stored (`HIT` only) |
-| `x-cache-invalidated` | Number of entries a mutation removed |
-
-### When a request is cached
-
-A request is looked up and stored only if all of these hold. The `x-cache-reason` for each
-refusal is in the right column.
-
-| Check | Bypass reason |
-| --- | --- |
-| Path is `/graphql` and method is `POST` or `QUERY` (GET is passed through) | `method-not-cached` |
-| `Content-Type` is `application/json` | `unsupported-content-type` |
-| Body is valid JSON, one operation (no batching), with a `query` string | `invalid-json`, `invalid-body`, `batched-request`, `missing-query` |
-| The query parses | `parse-error` |
-| The operation to run can be determined (`operationName` for multi-operation documents) | `operation-not-found` |
-| The document validates against the schema (no unknown fields) | `invalid-document` |
-| Variables match their declared types | `invalid-variables` |
-| The operation is a query, not a mutation or subscription | `mutation`, `subscription` |
-| No introspection (`__schema`, `__type`); `__typename` is fine | `introspection` |
-| Every selected field is in the public allowlist (`src/cache/policy.js`) | `non-public-field:<Type.field>` |
-| No `Authorization` or `Cookie` request header | `authenticated` |
-
-The operation type, introspection and fields are read from the **parsed GraphQL AST**, never by
-searching the query string. A query named `mutationFree`, or one with `# mutation` in a comment,
-is still recognized as a query; a mutation preceded by comments or another operation is still
-recognized as a mutation. Both cases are in the tests.
-
-The allowlist is **default-deny**. A field added to the schema later is not cached until someone
-decides it is public. Forgetting to allow a public field costs a cache miss; forgetting to exclude
-a private one would leak data.
-
-### When a response is stored
-
-After a `MISS`, the origin's response is stored only if:
-
-| Check | Reason when not stored |
-| --- | --- |
-| HTTP status is 200 | `not-stored:status-<code>` |
-| The response is JSON | `not-stored:not-json` |
-| No `Set-Cookie` header | `not-stored:set-cookie` |
-| No `Cache-Control: private` or `no-store` from the origin | `not-stored:origin-cache-control` |
-| No `errors` in the GraphQL response | `not-stored:graphql-errors` |
-| `data` is present | `not-stored:no-data` |
-
-A GraphQL error can be temporary (a resolver timing out) or specific to one request. Caching it
-would serve the failure to everyone until it expires.
-
-### The cache key
-
-`src/cache/key.js` hashes, with SHA-256 over JSON with sorted keys:
-
-- the **host and path**: one cache in front of several hostnames or tenants must never let them
-  share entries
-- the **normalized operation**: only the selected operation and the fragments it uses, re-printed
-  by `graphql`'s `print()`, so whitespace, comments and other operations in the document do not
-  matter
-- the **coerced variables**: defaults applied, values normalized by their GraphQL types
-
-The HTTP method is not part of the key, so `POST` and `QUERY` share entries.
-
-If an origin reads more request context, such as a tenant header, a locale or a feature flag, that
-context must be added to the key, or requests that carry it must bypass the cache. Otherwise one
-client is served another client's answer.
-
-### TTL and bounded storage
-
-- Every entry expires after `CACHE_TTL_SECONDS` (default 30). A field can lower that with
-  `maxAge` in `src/cache/policy.js`; the effective TTL is the smallest `maxAge` of all selected
-  fields, capped by the configured TTL. No field in this example sets one; the tests show how it
-  works.
-- The store holds at most `CACHE_MAX_ENTRIES` (default 100). When it is full, expired entries are
-  dropped first, then the least recently used entry is evicted. Without a bound, every distinct
-  variables object would add an entry until the process runs out of memory.
-
-## Mutation-based invalidation
-
-The example implements **entity-based invalidation**, not only TTL expiry.
-
-1. **Tagging.** When a query response is stored, `src/cache/entities.js` walks the response
-   together with the operation and the schema, and records every `Book` it contains. The entry is
-   tagged `Book` and `Book:<id>`, or `Book:?` if the query did not select `id`.
-2. **Purging.** When a mutation's response passes through the cache, the same walk finds the books
-   it returned. For `updateBook(id: "1") { id title }`, every entry tagged `Book:1` or `Book:?` is
-   removed.
-3. **When in doubt, purge more.** If the mutation did not select `id`, every entry containing any
-   `Book` is removed. If a mutation ran but returned no identifiable object, the whole cache is
-   cleared. A mutation that failed before returning data (`"data": null`) removes nothing.
-
-What this approach does **not** cover, by design of a small example:
-
-- **Writes that bypass the cache.** A change made directly at the origin (step 5 of the
-  walkthrough), by another service or a batch job, is not seen. Those entries stay stale until the
-  TTL ends. The TTL is the upper bound for staleness.
-- **New objects in existing lists.** A mutation that creates a book would return a book no cached
-  list contains yet, so cached lists would not be purged. This API has no create mutation; a real
-  one needs list-level tags.
-- **Side effects.** Only the objects a mutation returns are purged. If a mutation also changes
-  other objects, the cache cannot know.
-- **Several instances.** Invalidation only reaches the memory of this one process.
-
-## GET, POST and QUERY
-
-| | `GET` | `POST` | `QUERY` ([RFC 10008](https://www.rfc-editor.org/rfc/rfc10008)) |
-| --- | --- | --- | --- |
-| Where the operation travels | URL query string | Request body | Request body |
-| Safe and idempotent | Yes | No | Yes |
-| Cached by standard HTTP caches and CDNs | Yes, keyed by URL | Generally not | Allowed, the cache key must include the body |
-| Size limits | URL length limits apply | Body | Body |
-| Can carry a mutation | Must not (GraphQL over HTTP rejects it) | Yes | Must not |
-| Support today | Universal | Universal | New; servers, proxies, firewalls and clients are still adding it |
-
-`POST` is what most GraphQL clients send, which is why standard HTTP caches do not help: they
-cannot tell a `POST` that reads from one that writes. The cache in this example parses the body
-to find out. `QUERY` states in the method itself that the request only reads, while keeping the
-operation in the body.
-
-### QUERY in this example (experimental)
-
-- **GraphQL Yoga does not accept `QUERY`.** Sent directly to the origin, it answers
-  `405 Method Not Allowed` with `Allow: GET, POST`. A test checks this.
-- **Node.js does.** Its HTTP parser knows the `QUERY` method, so the proxy receives it.
-- **The proxy translates.** A `QUERY` request for a query operation is forwarded to the origin as
-  `POST` and cached exactly like the same operation over `POST`, sharing the entry.
-- **Unsafe operations are rejected.** A mutation or subscription sent with `QUERY` is answered with
-  `405`, `Allow: POST`, before it reaches the origin.
-
-This translation is an integration choice of this example, not standard behavior of GraphQL Yoga
-or of GraphQL over HTTP. `QUERY` is not a CORS-safelisted method, so browsers send a preflight for
-cross-origin `QUERY` requests.
-
-## Configuration
-
-All settings are environment variables with defaults. No `.env` file is needed.
-
-| Variable | Default | Meaning |
+[`graphpilot/compare.sh`](graphpilot/compare.sh) sends the same requests to both endpoints and
+prints the HTTP status, `gp-cache`, the timing, the entry's age and remaining freshness, the
+`Book:id:*` surrogate keys and the data. Without `GRAPHPILOT_URL` it runs only the direct
+requests. What to expect:
+
+| Step | Requests | Expected |
 | --- | --- | --- |
-| `PORT` | `4000` | Port of the cache proxy |
-| `ORIGIN_PORT` | `4001` | Port of the GraphQL origin |
-| `HOST` | `127.0.0.1` | Interface both servers bind to |
-| `CACHE_TTL_SECONDS` | `30` | Default and maximum TTL of an entry |
-| `CACHE_MAX_ENTRIES` | `100` | Maximum number of cached responses |
-| `ORIGIN_DELAY_MS` | `0` | Artificial origin latency. Set `400` to make a HIT visibly faster than a MISS |
+| 0 | `updateBook` back to the original title, through GraphPilot | Resets book 1 and purges its cached copies, so the run starts clean |
+| 1 | `books` twice, **direct** | No `gp-cache` header. Both requests reach the origin |
+| 2 | `books` twice, **through GraphPilot** | `MISS`, then `HIT`. The `HIT` does not reach the origin |
+| 3 | `book(id: $id)` with `id` 1, 2, then 1 again | `MISS`, `MISS`, `HIT`: different variables are different entries |
+| 4 | `updateBook(id: "1", title: "Updated Book Title")`, then `books` | Mutation: `PASS` with `CACHE_SKIPPED_UNCACHEABLE_OPERATION`. Then `MISS` with the new title, and `HIT` again |
+| 5 | Change book 1 **directly at the origin**, then `books` through GraphPilot | `HIT` with the **old** title: GraphPilot never saw this write |
+| 6 | Restore book 1 through GraphPilot, then `books` | `MISS` with the original title |
 
-Example: `CACHE_TTL_SECONDS=5 ORIGIN_DELAY_MS=400 npm start`.
+Step 4 is automatic invalidation. The cached `books` and `book(id: "1")` responses were tagged
+`Book:id:1`, because they contained book 1. The mutation's response contained book 1 as well, so
+GraphPilot purged every response tagged `Book:id:1`. Nothing in the origin or the config asks for
+this. See [automatic invalidation](https://docs.graphpilot.io/invalidation/automatic/).
+
+Step 5 is the limit of automatic invalidation: a change that does not go through GraphPilot
+(an admin tool, an import job, or here a request straight to the origin) purges nothing. The
+stale entry stays until its 30 seconds are over, or until you purge the key yourself:
+
+```bash
+gpilot service purge Book:id:1
+```
+
+See [purging through the API and CLI](https://docs.graphpilot.io/invalidation/api/).
+
+Purges reach GraphPilot's edge locations asynchronously, usually within seconds. The script waits
+`PURGE_WAIT_SECONDS` (default `3`) after each mutation before it reads again.
+
+### The same requests with curl
+
+Replace `$URL` with either endpoint:
+
+```bash
+# The query. Through GraphPilot: MISS the first time, HIT the second time.
+curl -sS -D - -o /dev/null "$URL" \
+  -H 'content-type: application/json' \
+  --data '{"query":"{ books { id title author } }"}' | grep -i '^gp-'
+
+# The mutation. Through GraphPilot: PASS, and the cached books are purged.
+curl -sS "$URL" \
+  -H 'content-type: application/json' \
+  --data '{"query":"mutation { updateBook(id: \"1\", title: \"Updated Book Title\") { id title } }"}'
+```
+
+Through GraphPilot, a `HIT` looks like this (the values depend on timing):
+
+```text
+gp-cache: HIT
+gp-cache-hits: 1
+gp-cache-age: 4
+gp-cache-max-age: 30
+gp-cache-remaining: 26
+gp-surrogate-key: ...
+```
+
+Direct, there is no `gp-` header at all. What each header means:
+[cache statuses](https://docs.graphpilot.io/caching/statuses/) and the
+[headers reference](https://docs.graphpilot.io/reference/headers/).
+
+## What the demo does not cover
+
+- **Request signing.** GraphPilot signs every request it forwards, and in production the origin
+  should refuse requests that are not signed, so it only trusts traffic that came through
+  GraphPilot. This demo leaves the origin open on purpose, because the comparison needs the
+  direct endpoint. See [request signing](https://docs.graphpilot.io/security/request-signing/).
+- **Per-user data.** Every field here is `PUBLIC`. Data that differs per user or per
+  organization needs a `PRIVATE` or named scope; see
+  [who shares an entry](https://docs.graphpilot.io/caching/partitioning/).
+- **New books in cached lists.** The API has no create mutation. A mutation purges the objects
+  it returns, so a new object is not in any cached list yet; see
+  [automatic invalidation](https://docs.graphpilot.io/invalidation/automatic/) for how lists
+  are handled.
+- **HTTP `QUERY`** ([RFC 10008](https://www.rfc-editor.org/rfc/rfc10008)). The GraphPilot
+  configuration reference documents `QUERY` support and an `origin.method_rewrite` setting. This
+  demo does not use or verify it, and GraphQL Yoga answers `QUERY` with `405`, so the direct
+  endpoint could not take part in that comparison. The educational cache shows the method; see
+  [GET, POST and QUERY](educational-cache/README.md#get-post-and-query).
+
+## Troubleshooting
+
+**`gp-cache: PASS` on the query.** Read `gp-cache-reason`. This origin sets no cookies and sends
+no `Cache-Control`, so the usual first-deployment causes do not apply. Check that you deployed
+`origin/schema.graphql` (with its `@cacheControl` hints) and not a schema pulled by
+introspection, which carries no hints. See
+[why is nothing cached?](https://docs.graphpilot.io/troubleshooting/why-is-nothing-cached/).
+
+**The first request of a run is already a `HIT`.** An earlier run cached it within the last 30
+seconds. Step 0 of the script purges book 1's entries; for anything else, wait 30 seconds or run
+`gpilot service purge --all`.
+
+**Still a `HIT` with the old title right after a mutation.** Purges are asynchronous. Retry after
+a moment, or raise `PURGE_WAIT_SECONDS`.
+
+**Step 5 shows the new title through GraphPilot.** `ORIGIN_URL` is not the origin GraphPilot
+forwards to, or the step ran after the entry expired. Point both at the same running origin.
+
+**HTTP `500` with `unknown domain` right after the first deployment.** The hostname is not yet
+served by every edge location. Retry after a few minutes.
+
+**`Error: listen EADDRINUSE` from `npm run origin`.** Port 4000 is taken. Use another one:
+`PORT=4200 npm run origin`, and set `ORIGIN_URL` to match.
 
 ## Tests
 
@@ -504,83 +342,34 @@ Example: `CACHE_TTL_SECONDS=5 ORIGIN_DELAY_MS=400 npm start`.
 npm test
 ```
 
-The suite uses the Node.js built-in test runner and a fake clock, so TTL tests do not sleep.
-
 | File | Covers |
 | --- | --- |
-| `test/caching.test.js` | MISS then HIT, query normalization, variables, `operationName`, host isolation, TTL and `maxAge`, LRU bound |
-| `test/mutations.test.js` | Mutations never cached, AST-based detection, entity invalidation, stale data without invalidation, conservative purges |
-| `test/safety.test.js` | `Authorization` and `Cookie` bypass, no cross-user sharing, introspection, allowlist, invalid documents, error responses not stored |
-| `test/query-method.test.js` | Yoga rejects `QUERY`, the proxy serves and caches it, shares entries with `POST`, rejects mutations |
-| `test/server.test.js` | End to end over real HTTP on random ports |
+| `test/origin.test.js` | The origin on its own: the Book queries and mutation, every request reaching it, no `Set-Cookie` or `Cache-Control`, and the `@cacheControl` hint and `id` field in `origin/schema.graphql` |
+| `test/educational-cache/*.test.js` | The educational cache, see its README |
 
-## Troubleshooting
+The tests run without network access and without a GraphPilot account. They do not test
+GraphPilot itself; `npm run compare` against a deployed service does.
 
-**`Error: listen EADDRINUSE` on start.** Port 4000 or 4001 is taken, often by a previous
-`npm start`. Stop it, or pick other ports: `PORT=5000 ORIGIN_PORT=5001 npm start` (and
-`PROXY=http://127.0.0.1:5000/graphql ORIGIN=http://127.0.0.1:5001/graphql npm run demo`).
+## The educational cache
 
-**`npm install` warns about the engine, or Yoga fails to start.** Check `node --version`; Node.js
-22.15 or newer is required.
+[`educational-cache/`](educational-cache/README.md) is a separate, hand-written in-memory cache
+in front of its own copy of the same origin (ports 4100 and 4101). It shows how cache keys,
+TTLs, bypass rules and invalidation work, and how HTTP `QUERY` differs from `POST`. It is for
+learning, it is not GraphPilot, and the GraphPilot demo does not use it.
 
-**Always `BYPASS`.** Read `x-cache-reason`. Common causes: a missing
-`content-type: application/json` header (`unsupported-content-type`), an `Authorization` or
-`Cookie` header your HTTP client adds automatically (`authenticated`), or a field that is not in
-the allowlist (`non-public-field:Type.field`).
-
-**Always `MISS`, never `HIT`.** Read `x-cache-reason` on the `MISS`. `not-stored:graphql-errors`
-means the response had errors. If there is no reason, compare `x-cache-key` between requests:
-different variables, a different host (`localhost` versus `127.0.0.1`) or a different operation
-give different keys. A TTL shorter than the time between requests also causes it.
-
-**The demo shows unexpected titles.** The data is in memory and the demo changes book 1. Restart
-the server before running `npm run demo` again.
-
-**`curl -X QUERY` returns 405.** Check that the request goes to the proxy (port 4000), not to the
-origin (port 4001), and that the operation is a query. Mutations are rejected over `QUERY` on
-purpose.
-
-## Limitations
-
-This example teaches the moving parts. It deliberately leaves out what a production cache needs:
-
-- **One process.** Entries live in memory, are lost on restart, and are not shared between
-  instances or regions. Invalidation reaches only this process.
-- **No request collapsing.** When a popular entry expires, every concurrent request goes to the
-  origin.
-- **No stale-while-revalidate.** An expired entry is never served while a fresh one is fetched.
-- **Blunt authentication handling.** Every request with `Authorization` or `Cookie` bypasses the
-  cache. Caching per user or per organization needs partitioned keys.
-- **No persisted queries, no batching, no subscriptions.**
-- **Invalidation only sees mutations that pass through it**, see
-  [Mutation-based invalidation](#mutation-based-invalidation).
-- **No metrics, limits or protection** beyond a 1 MiB request body limit.
-
-## Where a managed GraphQL edge cache fits
-
-```text
-  client ──► GraphQL edge cache (close to the client) ──► your GraphQL origin
+```bash
+npm run educational        # start it
+npm run educational:demo   # walk through every scenario
 ```
 
-A dedicated GraphQL edge cache moves the logic of this example out of your application and in
-front of it, at locations close to your clients. [GraphPilot](https://graphpilot.io/) provides
-managed GraphQL edge caching. According to its documentation, it covers parts this example leaves
-out:
+## Repository layout
 
-- **Automatic keys from schema and response data.** GraphPilot derives surrogate keys from your
-  schema and each response (one per returned object), and a mutation purges what it returned
-  automatically. Clients do not have to select `id`; selection set expansion adds the fields a key
-  needs. See [cache invalidation](https://docs.graphpilot.io/invalidation/).
-- **Purges from outside**, for writes that bypass the cache, through an API, a CLI and the portal.
-- **Request collapsing**, so an expiring entry does not send every waiting client to your origin.
-  See [request collapsing](https://docs.graphpilot.io/caching/request-collapsing/).
-- **Stale windows and partitioning** (who may share an entry: everyone, an organization, or one
-  caller) instead of bypassing every authenticated request.
-- **HTTP `QUERY`.** GraphPilot accepts `QUERY` from clients and caches it like the same operation
-  over `POST`; `origin.method_rewrite` can downgrade it to `POST` for an origin that does not
-  support it, as this example does. See the
-  [configuration reference](https://docs.graphpilot.io/reference/configuration/).
-
-The example in this folder stays fully functional without GraphPilot. To put an edge cache in
-front of the same Book API, point it at the origin (or at a public tunnel to it) instead of at
-the local proxy.
+| Path | What it is |
+| --- | --- |
+| `origin/schema.graphql` | The Book schema, served by Yoga and deployed to GraphPilot |
+| `origin/schema.js`, `origin/data.js` | Resolvers and in-memory seed data |
+| `origin/create-origin.js`, `origin/server.js` | The GraphQL Yoga origin and its entry point (`npm run origin`) |
+| `graphpilot/gpilot.toml` | GraphPilot service configuration |
+| `graphpilot/compare.sh` | Direct versus GraphPilot comparison (`npm run compare`) |
+| `educational-cache/` | The educational in-memory cache, its examples and README |
+| `test/` | Automated tests (`npm test`) |

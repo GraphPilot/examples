@@ -14,7 +14,8 @@ Practical GraphQL caching examples, runnable demos, and integration guides for G
 
 | Example | What it shows |
 | --- | --- |
-| [`graphql-post-caching`](graphql-post-caching/) | Caching GraphQL `POST` (and HTTP `QUERY`) responses with a small in-memory cache in front of a GraphQL Yoga Book API: cache keys, HIT, MISS and BYPASS, TTL, bounded storage, and invalidation after a mutation. Accompanies the article "How to Cache GraphQL POST Requests: A Practical Guide". |
+| [`graphql-post-caching`](graphql-post-caching/) | A Book GraphQL API (GraphQL Yoga) called directly and through the GraphPilot edge cache, with a script that compares cache `MISS`, `HIT` and mutation-driven invalidation on both endpoints. Also contains a separate, hand-written in-memory cache for learning how GraphQL `POST` caching works. Accompanies the article "How to Cache GraphQL POST Requests: A Practical Guide". |
 
-Each example is self-contained in its own folder, with its own `package.json` and README. None of
-them needs a GraphPilot account to run.
+Each example is self-contained in its own folder, with its own `package.json` and README. Every
+origin runs locally without a GraphPilot account; only the steps that put GraphPilot in front of
+it need one.

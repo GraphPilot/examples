@@ -1,7 +1,7 @@
 // End-to-end over real HTTP: starts the origin and the proxy on random ports.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { startServers } from '../src/server.js';
+import { startServers } from '../../educational-cache/server.js';
 import { BOOKS_QUERY } from './helpers.js';
 
 let servers;

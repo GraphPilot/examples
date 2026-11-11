@@ -1,0 +1,21 @@
+# GraphPilot service configuration for the Book demo.
+#
+# Deploy from the graphql-post-caching/ folder:
+#   gpilot deploy --schema origin/schema.graphql --config graphpilot/gpilot.toml
+#
+# Everything else keeps GraphPilot's defaults:
+#   - GraphQL is served on /graphql (the origin's path).
+#   - Cache lifetimes and scopes come from the @cacheControl hints in
+#     origin/schema.graphql (Book: 30 seconds, PUBLIC).
+#   - Every object with an `id` field is tagged with a surrogate key such as
+#     Book:id:1, so the updateBook mutation purges every cached response that
+#     contains that book.
+#   - The gp-cache response headers (gp-cache, gp-cache-reason, gp-cache-age,
+#     ...) are on by default.
+#
+# Reference: https://docs.graphpilot.io/reference/configuration/
+
+[response]
+# Also show the surrogate keys each response is tagged with (gp-surrogate-key),
+# so the demo can show why a mutation purges a cached response.
+surrogate_key_header = true

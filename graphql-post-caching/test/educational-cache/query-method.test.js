@@ -2,7 +2,7 @@
 // GraphQL Yoga does not accept QUERY, so the proxy forwards it as POST.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { createOrigin } from '../src/origin.js';
+import { createOrigin } from '../../origin/create-origin.js';
 import { BOOKS_QUERY, createTestEnv } from './helpers.js';
 
 describe('HTTP QUERY method', () => {

@@ -2,16 +2,19 @@
   "name": "graphql-post-caching",
   "version": "1.0.0",
   "private": true,
-  "description": "Educational example: caching GraphQL POST responses with a small in-memory cache in front of a GraphQL Yoga origin.",
+  "description": "Book GraphQL API for comparing a direct origin with the same origin behind GraphPilot, plus an educational in-memory GraphQL POST cache.",
   "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=22.15.0"
   },
   "scripts": {
-    "start": "node src/server.js",
-    "test": "node --test \"test/**/*.test.js\"",
-    "demo": "bash examples/curl-walkthrough.sh"
+    "origin": "node origin/server.js",
+    "start": "node origin/server.js",
+    "compare": "bash graphpilot/compare.sh",
+    "educational": "node educational-cache/server.js",
+    "educational:demo": "bash educational-cache/examples/curl-walkthrough.sh",
+    "test": "node --test \"test/**/*.test.js\""
   },
   "dependencies": {
     "graphql": "^16.15.0",

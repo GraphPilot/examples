@@ -13,14 +13,14 @@ import { schema } from './schema.js';
  * @param {object} [options]
  * @param {ReturnType<typeof createBookStore>} [options.store]
  * @param {number} [options.delayMs] Artificial latency per request, so a cache
- *   HIT is visibly faster than a MISS in the demo. 0 disables it.
+ *   HIT is visibly faster than a request that reaches the origin. 0 disables it.
  */
 export function createOrigin({ store = createBookStore(), delayMs = 0 } = {}) {
   const yoga = createYoga({
     schema,
     graphqlEndpoint: '/graphql',
     landingPage: false,
-    // Keep the console quiet; the cache proxy logs every request instead.
+    // Yoga's own logging is off; origin/server.js logs one line per request.
     logging: false,
     context: async () => {
       if (delayMs > 0) await sleep(delayMs);

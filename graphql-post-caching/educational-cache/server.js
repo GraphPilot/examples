@@ -1,6 +1,9 @@
 // Starts two HTTP servers in one process:
 //
-//   client ──► cache proxy (:4000) ──► GraphQL origin (:4001)
+//   client ──► educational cache proxy (:4100) ──► Book GraphQL origin (:4101)
+//
+// EDUCATIONAL ONLY. This is not GraphPilot and not part of the GraphPilot
+// product demo. It shows the moving parts of a GraphQL-aware cache.
 //
 // The origin is reachable directly as well, which the README uses to show how
 // a cache serves stale data when the origin changes behind its back.
@@ -10,8 +13,8 @@ import { fileURLToPath } from 'node:url';
 import { createCachingProxy } from './cache/handler.js';
 import { loadConfig } from './config.js';
 import { createHttpOrigin, toNodeListener } from './http.js';
-import { createOrigin } from './origin.js';
-import { schema } from './schema.js';
+import { createOrigin } from '../origin/create-origin.js';
+import { schema } from '../origin/schema.js';
 
 export async function startServers(config = loadConfig(), { log = console.log } = {}) {
   const { yoga, store } = createOrigin({ delayMs: config.originDelayMs });
@@ -53,13 +56,13 @@ function close(server) {
   return new Promise((resolve) => server.close(() => resolve()));
 }
 
-// Run only when started directly (`npm start`), not when imported by tests.
+// Run only when started directly (`npm run educational`), not when imported by tests.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const config = loadConfig();
   const servers = await startServers(config);
-  console.log(`Cache proxy:    ${servers.proxyUrl}/graphql   (send requests here)`);
-  console.log(`GraphQL origin: ${servers.originUrl}/graphql   (bypasses the cache)`);
-  console.log(`Cache stats:    ${servers.proxyUrl}/_cache/stats`);
+  console.log(`Educational cache: ${servers.proxyUrl}/graphql   (send requests here)`);
+  console.log(`Book origin:       ${servers.originUrl}/graphql   (bypasses the cache)`);
+  console.log(`Cache stats:       ${servers.proxyUrl}/_cache/stats`);
   console.log(
     `TTL ${config.ttlSeconds}s, max ${config.maxEntries} entries, origin delay ${config.originDelayMs}ms. Ctrl+C to stop.`,
   );

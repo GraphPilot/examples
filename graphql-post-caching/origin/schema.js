@@ -1,33 +1,13 @@
-// The GraphQL origin: schema and resolvers.
+// The executable schema of the Book API: origin/schema.graphql plus resolvers.
 //
 // The origin knows nothing about caching. It is an ordinary GraphQL API with
 // public book reads and one mutation that changes data.
 
+import { readFileSync } from 'node:fs';
 import { GraphQLError } from 'graphql';
 import { createSchema } from 'graphql-yoga';
 
-export const typeDefs = /* GraphQL */ `
-  type Book {
-    id: ID!
-    title: String!
-    author: String!
-    category: String!
-    "Price in cents"
-    price: Int!
-  }
-
-  type Query {
-    "All books, or the books of one category."
-    books(category: String): [Book!]!
-    "One book, or null when it does not exist."
-    book(id: ID!): Book
-  }
-
-  type Mutation {
-    "Changes a book's title. Cached responses that contain this book become outdated."
-    updateBook(id: ID!, title: String!): Book!
-  }
-`;
+export const typeDefs = readFileSync(new URL('./schema.graphql', import.meta.url), 'utf8');
 
 export const resolvers = {
   Query: {
