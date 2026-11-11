@@ -1,0 +1,33 @@
+# Read operations of the Book demo. Cached by GraphPilot (Book: 30 seconds, PUBLIC).
+#
+# Run them from the IDE with the JetBrains GraphQL plugin: pick an endpoint in the toolbar
+# (direct, graphpilot or educational-cache, see graphql.config.yml), place the caret in an
+# operation and press Ctrl/Cmd + Enter. Variables go into the variables editor.
+
+# The query from the article and the demo videos.
+query AllBooks {
+  books {
+    id
+    title
+    author
+  }
+}
+
+# Variables: { "id": "1" }  (each id is a separate cache entry)
+query BookById($id: ID!) {
+  book(id: $id) {
+    id
+    title
+    author
+  }
+}
+
+# Variables: { "category": "scifi" }  or  { "category": "software" }
+query BooksByCategory($category: String) {
+  books(category: $category) {
+    id
+    title
+    category
+    price
+  }
+}

@@ -1,0 +1,2 @@
+# Personal endpoint URLs for the JetBrains HTTP Client (see requests/book-demo.http).
+requests/http-client.private.env.json

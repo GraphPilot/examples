@@ -1,0 +1,26 @@
+# Write operations of the Book demo. Never cached. Sent through GraphPilot, a mutation purges
+# every cached response that contains the book it returns (surrogate key Book:id:<id>).
+
+# The mutation from the article and the demo videos.
+mutation UpdateBookTitle {
+  updateBook(id: "1", title: "Updated Book Title") {
+    id
+    title
+  }
+}
+
+# Puts book 1 back to its original title.
+mutation RestoreBookTitle {
+  updateBook(id: "1", title: "The Pragmatic Programmer") {
+    id
+    title
+  }
+}
+
+# Variables: { "id": "2", "title": "Any New Title" }
+mutation UpdateBook($id: ID!, $title: String!) {
+  updateBook(id: $id, title: $title) {
+    id
+    title
+  }
+}

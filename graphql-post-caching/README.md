@@ -27,6 +27,7 @@ videos.
 - [The Book API](#the-book-api)
 - [Put GraphPilot in front of the origin](#put-graphpilot-in-front-of-the-origin)
 - [Compare the two endpoints](#compare-the-two-endpoints)
+- [Run the requests from your IDE](#run-the-requests-from-your-ide)
 - [What the demo does not cover](#what-the-demo-does-not-cover)
 - [Troubleshooting](#troubleshooting)
 - [Tests](#tests)
@@ -293,6 +294,55 @@ Direct, there is no `gp-` header at all. What each header means:
 [cache statuses](https://docs.graphpilot.io/caching/statuses/) and the
 [headers reference](https://docs.graphpilot.io/reference/headers/).
 
+## Run the requests from your IDE
+
+The same requests are ready to run from JetBrains IDEs (IntelliJ IDEA, WebStorm and others) and
+VS Code, as HTTP requests and as GraphQL documents. They point at the direct origin and at
+GraphPilot, so you can send them side by side and compare the `gp-cache` response headers.
+
+| File | Runs in | What it contains |
+| --- | --- | --- |
+| [`requests/book-demo.http`](requests/book-demo.http) | JetBrains HTTP Client, VS Code REST Client | The comparison as HTTP requests, in order: direct, `MISS` and `HIT`, variables, the mutation, the stale entry, restore |
+| [`requests/operations/queries.graphql`](requests/operations/queries.graphql) | JetBrains GraphQL plugin | `AllBooks` (the article query), `BookById`, `BooksByCategory` |
+| [`requests/operations/mutations.graphql`](requests/operations/mutations.graphql) | JetBrains GraphQL plugin | `UpdateBookTitle` (the article mutation), `RestoreBookTitle`, `UpdateBook` with variables |
+| [`graphql.config.yml`](graphql.config.yml) | JetBrains GraphQL plugin | Schema for completion and validation, and the endpoints `direct`, `graphpilot` and `educational-cache` |
+
+### Set your GraphPilot URL
+
+Everything works against the local origin without any setup. For GraphPilot, set your service
+URL once:
+
+- **GraphQL documents and `npm run compare`:** copy [`.env.example`](.env.example) to
+  `.env.local` and fill in `GRAPHPILOT_URL`. The GraphQL plugin reads `.env.local` next to
+  `graphql.config.yml`, and `graphpilot/compare.sh` reads it too. Variables set in your shell
+  take precedence.
+- **HTTP requests in a JetBrains IDE:** copy
+  [`requests/http-client.private.env.json.example`](requests/http-client.private.env.json.example)
+  to `requests/http-client.private.env.json`, fill in the URL and select the `demo` environment
+  in the editor toolbar. Environment values take precedence over the `@graphpilot` default in
+  the `.http` file.
+- **HTTP requests in VS Code:** install the REST Client extension and edit the `@graphpilot`
+  line at the top of `requests/book-demo.http`.
+
+`.env.local` and `requests/http-client.private.env.json` are not committed.
+
+### Run them
+
+- **`.http` file:** open `requests/book-demo.http` and select the run icon next to a request
+  (JetBrains) or **Send Request** above it (VS Code). The response view shows the headers,
+  including `gp-cache`.
+- **`.graphql` files:** with the JetBrains GraphQL plugin installed, choose the endpoint in the
+  editor toolbar, place the caret in an operation and run **Execute Query** (`Ctrl+Enter` or
+  `Cmd+Enter`). Operations with variables take them from the variables editor
+  (**Toggle Variables Editor**); each one names example variables in a comment.
+
+Do not run an introspection query from the GraphQL plugin for this project: the plugin writes the
+result to the first schema path, `origin/schema.graphql`, and would drop the `@cacheControl`
+hints GraphPilot reads from that file.
+
+The educational cache has its own request file:
+[`educational-cache/examples/requests.http`](educational-cache/examples/requests.http).
+
 ## What the demo does not cover
 
 - **Request signing.** GraphPilot signs every request it forwards, and in production the origin
@@ -345,6 +395,7 @@ npm test
 | File | Covers |
 | --- | --- |
 | `test/origin.test.js` | The origin on its own: the Book queries and mutation, every request reaching it, no `Set-Cookie` or `Cache-Control`, and the `@cacheControl` hint and `id` field in `origin/schema.graphql` |
+| `test/requests.test.js` | Every request in `requests/book-demo.http` and every operation in `requests/operations/` is valid against the schema and runs against the origin without errors |
 | `test/educational-cache/*.test.js` | The educational cache, see its README |
 
 The tests run without network access and without a GraphPilot account. They do not test
@@ -371,5 +422,7 @@ npm run educational:demo   # walk through every scenario
 | `origin/create-origin.js`, `origin/server.js` | The GraphQL Yoga origin and its entry point (`npm run origin`) |
 | `graphpilot/gpilot.toml` | GraphPilot service configuration |
 | `graphpilot/compare.sh` | Direct versus GraphPilot comparison (`npm run compare`) |
+| `requests/` | Ready-made requests for the IDE: `book-demo.http` and `operations/*.graphql` |
+| `graphql.config.yml`, `.env.example` | GraphQL plugin configuration and the endpoint URLs it reads |
 | `educational-cache/` | The educational in-memory cache, its examples and README |
 | `test/` | Automated tests (`npm test`) |

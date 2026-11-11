@@ -1,0 +1,91 @@
+# Book demo requests: the same operations against the origin directly and through GraphPilot.
+#
+# Runs in the JetBrains HTTP Client (IntelliJ IDEA, WebStorm, ...) and the VS Code REST Client.
+#
+#   1. Start the origin:            npm run origin
+#   2. Set your GraphPilot URL:
+#        JetBrains: copy http-client.private.env.json.example to http-client.private.env.json,
+#                   fill in the URL and select the "demo" environment.
+#                   (Environment variables take precedence over the @graphpilot default below.)
+#        VS Code:   edit the @graphpilot line below.
+#   3. Send the requests from top to bottom and compare the gp-cache response headers.
+#
+# Direct responses carry no gp- headers. GraphPilot responses carry gp-cache (MISS, HIT, PASS),
+# gp-cache-age, gp-cache-remaining and gp-surrogate-key.
+
+@direct = http://127.0.0.1:4000/graphql
+@graphpilot = https://book-demo.example.graphpilot.cloud/graphql
+
+### 1a. All books, direct (every request reaches the origin)
+POST {{direct}}
+Content-Type: application/json
+
+{
+  "query": "{ books { id title author } }"
+}
+
+### 1b. All books, through GraphPilot (send twice: MISS, then HIT)
+POST {{graphpilot}}
+Content-Type: application/json
+
+{
+  "query": "{ books { id title author } }"
+}
+
+### 2a. One book by id, through GraphPilot (change "id" for a separate cache entry)
+POST {{graphpilot}}
+Content-Type: application/json
+
+{
+  "query": "query Book($id: ID!) { book(id: $id) { id title author } }",
+  "variables": { "id": "1" }
+}
+
+### 2b. Books of one category, through GraphPilot
+POST {{graphpilot}}
+Content-Type: application/json
+
+{
+  "query": "query Books($category: String) { books(category: $category) { id title category } }",
+  "variables": { "category": "scifi" }
+}
+
+### 3. Update book 1 through GraphPilot (PASS; purges every cached response containing Book:id:1)
+POST {{graphpilot}}
+Content-Type: application/json
+
+{
+  "query": "mutation { updateBook(id: \"1\", title: \"Updated Book Title\") { id title } }"
+}
+
+### 4. All books again, through GraphPilot (MISS with the new title, then HIT)
+POST {{graphpilot}}
+Content-Type: application/json
+
+{
+  "query": "{ books { id title author } }"
+}
+
+### 5. Change book 1 directly at the origin (GraphPilot does not see this write)
+POST {{direct}}
+Content-Type: application/json
+
+{
+  "query": "mutation { updateBook(id: \"1\", title: \"Changed At The Origin\") { id title } }"
+}
+
+### 6. All books through GraphPilot: HIT with the old title until the entry expires (30 s)
+POST {{graphpilot}}
+Content-Type: application/json
+
+{
+  "query": "{ books { id title author } }"
+}
+
+### 7. Restore book 1 through GraphPilot (purges again)
+POST {{graphpilot}}
+Content-Type: application/json
+
+{
+  "query": "mutation { updateBook(id: \"1\", title: \"The Pragmatic Programmer\") { id title } }"
+}

@@ -8,6 +8,8 @@
 #   export GRAPHPILOT_URL=https://<subdomain>.<label>.graphpilot.cloud/graphql
 #   npm run compare
 #
+# Both can also be set in graphql-post-caching/.env.local (see .env.example).
+#
 # ORIGIN_URL must be the same origin GraphPilot forwards to: the script changes
 # a book directly there to show what a cache does when data changes behind it.
 # Without GRAPHPILOT_URL, only the direct requests run.
@@ -15,6 +17,18 @@
 # Requires: bash, curl, node (for printing the JSON compactly).
 
 set -euo pipefail
+
+# Optional: read ORIGIN_URL and GRAPHPILOT_URL from graphql-post-caching/.env.local (see
+# .env.example). Variables already set in the shell win.
+ENV_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.env.local"
+if [[ -f "$ENV_FILE" ]]; then
+  while IFS='=' read -r key value; do
+    [[ "$key" == ORIGIN_URL || "$key" == GRAPHPILOT_URL || "$key" == PURGE_WAIT_SECONDS ]] || continue
+    value="${value%\"}"
+    value="${value#\"}"
+    if [[ -z "${!key:-}" ]]; then export "$key=$value"; fi
+  done <"$ENV_FILE"
+fi
 
 ORIGIN_URL="${ORIGIN_URL:-http://127.0.0.1:4000/graphql}"
 GRAPHPILOT_URL="${GRAPHPILOT_URL:-}"

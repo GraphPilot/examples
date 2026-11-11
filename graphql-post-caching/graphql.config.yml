@@ -1,0 +1,21 @@
+# GraphQL IDE configuration (graphql-config format) for the JetBrains GraphQL plugin:
+# schema-aware completion and validation for requests/operations/*.graphql, and an endpoint
+# picker to run them.
+#
+# The URLs come from environment variables, for example in a .env.local file next to this one
+# (see .env.example; .env.local is not committed). The defaults below apply when they are unset.
+#
+# Do NOT run an introspection query from the IDE for this config: the plugin would write the
+# result to the first schema path, origin/schema.graphql, and drop its @cacheControl hints,
+# which GraphPilot reads from that file.
+
+schema: origin/schema.graphql
+documents: requests/operations/**/*.graphql
+extensions:
+  endpoints:
+    direct:
+      url: ${ORIGIN_URL:"http://127.0.0.1:4000/graphql"}
+    graphpilot:
+      url: ${GRAPHPILOT_URL:"https://book-demo.example.graphpilot.cloud/graphql"}
+    educational-cache:
+      url: http://127.0.0.1:4100/graphql
