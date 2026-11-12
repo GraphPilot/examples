@@ -63,11 +63,16 @@ npm run educational
 Educational cache: http://127.0.0.1:4100/graphql   (send requests here)
 Book origin:       http://127.0.0.1:4101/graphql   (bypasses the cache)
 Cache stats:       http://127.0.0.1:4100/_cache/stats
-TTL 30s, max 100 entries, origin delay 0ms. Ctrl+C to stop.
+TTL 5s, max 100 entries, origin delay 400ms. Ctrl+C to stop.
 ```
 
 The educational cache starts its own copy of the Book origin on port 4101, so it runs next to
 `npm run origin` (port 4000) without sharing data.
+
+The defaults are chosen for the walkthrough and the blog article: entries live for **5 seconds**,
+so you can watch one expire, and the origin answers after **400 ms**, so a `HIT` is visibly
+faster than a `MISS`. Change them with `CACHE_TTL_SECONDS` and `ORIGIN_DELAY_MS`, see
+[configuration](#configuration).
 
 In a second terminal, send the first request twice:
 
@@ -85,8 +90,8 @@ To run every scenario of this README in order:
 npm run educational:demo
 ```
 
-The demo changes book 1, so start it against a freshly started server. To watch an entry expire
-during the demo, start the server with a short TTL: `CACHE_TTL_SECONDS=5 npm run educational`.
+The demo changes book 1, so start it against a freshly started server. With the default TTL of
+5 seconds, its last step waits for an entry to expire.
 
 ## Architecture
 
@@ -131,6 +136,10 @@ It decides what is public from its own allowlist in `cache/policy.js` instead.
 Every step below is part of `npm run educational:demo`. The outputs are from a real run; cache keys depend on
 host, path, operation and variables, so yours match as long as you use `127.0.0.1:4100`.
 
+The script sends each step right after the previous one, well within the 5 second TTL. If you
+type the commands by hand instead, start the server with `CACHE_TTL_SECONDS=30 npm run educational`,
+or entries expire between your commands and you see a `MISS` where the walkthrough shows a `HIT`.
+
 The requests use these shell variables:
 
 ```bash
@@ -150,12 +159,12 @@ curl -i $PROXY -H 'content-type: application/json' --data "$BOOKS"
 HTTP/1.1 200 OK
 x-cache: MISS
 x-cache-key: 9bf884ed4fad8c8b
-x-cache-ttl: 30
+x-cache-ttl: 5
 
 {"data":{"books":[{"id":"1","title":"The Pragmatic Programmer","author":"Hunt & Thomas"}, ...]}}
 ```
 
-The origin answered, and the response was stored for 30 seconds.
+The origin answered after about 400 ms, and the response was stored for 5 seconds.
 
 ### 2. Identical second request: HIT
 
@@ -166,7 +175,7 @@ HTTP/1.1 200 OK
 age: 0
 x-cache: HIT
 x-cache-key: 9bf884ed4fad8c8b
-x-cache-ttl: 30
+x-cache-ttl: 5
 ```
 
 The origin was not called. `age` is the entry's age in seconds, `x-cache-ttl` the remaining
@@ -290,8 +299,7 @@ x-cache-reason: unsafe-operation-over-query
 
 ### 9. TTL expiration
 
-Start the server with `CACHE_TTL_SECONDS=5 npm run educational`, send the `books` query, wait six seconds
-and send it again: the second request is a `MISS`, and `/_cache/stats` counts one more
+Send the `books` query, wait six seconds and send it again: the second request is a `MISS`, and `/_cache/stats` counts one more
 `expirations`.
 
 ### 10. Cache statistics
@@ -300,7 +308,7 @@ and send it again: the second request is a `MISS`, and `/_cache/stats` counts on
 curl http://127.0.0.1:4100/_cache/stats
 ```
 
-After `npm run educational:demo` against `CACHE_TTL_SECONDS=5 npm run educational`:
+After `npm run educational:demo` against a freshly started `npm run educational`:
 
 ```json
 {"size":2,"maxEntries":100,"hits":5,"misses":5,"evictions":0,"expirations":1,"invalidations":2}
@@ -309,7 +317,7 @@ After `npm run educational:demo` against `CACHE_TTL_SECONDS=5 npm run educationa
 The proxy also logs one line per request in the terminal running `npm run educational`:
 
 ```text
-[cache] POST MISS key=9bf884ed4fad8c8b stored ttl=30s
+[cache] POST MISS key=9bf884ed4fad8c8b stored ttl=5s
 [cache] POST HIT key=9bf884ed4fad8c8b age=0s
 [cache] POST BYPASS authenticated (authorization header)
 [cache] POST BYPASS mutation, invalidated 2 entries
@@ -396,7 +404,7 @@ client is served another client's answer.
 
 ### TTL and bounded storage
 
-- Every entry expires after `CACHE_TTL_SECONDS` (default 30). A field can lower that with
+- Every entry expires after `CACHE_TTL_SECONDS` (default 5). A field can lower that with
   `maxAge` in `cache/policy.js`; the effective TTL is the smallest `maxAge` of all selected
   fields, capped by the configured TTL. No field in this example sets one; the tests show how it
   works.
@@ -469,11 +477,11 @@ All settings are environment variables with defaults. No `.env` file is needed.
 | `PORT` | `4100` | Port of the educational cache |
 | `ORIGIN_PORT` | `4101` | Port of its Book origin |
 | `HOST` | `127.0.0.1` | Interface both servers bind to |
-| `CACHE_TTL_SECONDS` | `30` | Default and maximum TTL of an entry |
+| `CACHE_TTL_SECONDS` | `5` | Default and maximum TTL of an entry. Short on purpose, so the walkthrough can show an entry expiring |
 | `CACHE_MAX_ENTRIES` | `100` | Maximum number of cached responses |
-| `ORIGIN_DELAY_MS` | `0` | Artificial origin latency. Set `400` to make a HIT visibly faster than a MISS |
+| `ORIGIN_DELAY_MS` | `400` | Artificial origin latency, so a `HIT` is visibly faster than a `MISS`. `0` switches it off |
 
-Example: `CACHE_TTL_SECONDS=5 ORIGIN_DELAY_MS=400 npm run educational`.
+Example: `CACHE_TTL_SECONDS=30 ORIGIN_DELAY_MS=0 npm run educational` for longer-lived entries and no artificial latency.
 
 ## Tests
 
@@ -508,7 +516,8 @@ the allowlist (`non-public-field:Type.field`).
 **Always `MISS`, never `HIT`.** Read `x-cache-reason` on the `MISS`. `not-stored:graphql-errors`
 means the response had errors. If there is no reason, compare `x-cache-key` between requests:
 different variables, a different host (`localhost` versus `127.0.0.1`) or a different operation
-give different keys. A TTL shorter than the time between requests also causes it.
+give different keys. With the default TTL of 5 seconds, requests typed by hand are often too far
+apart: start with `CACHE_TTL_SECONDS=30 npm run educational` for more time.
 
 **The demo shows unexpected titles.** The data is in memory and the demo changes book 1. Restart
 the server before running `npm run educational:demo` again.

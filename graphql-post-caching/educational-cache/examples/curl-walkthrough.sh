@@ -3,7 +3,7 @@
 #
 # EDUCATIONAL cache only (not GraphPilot). For GraphPilot, see graphpilot/compare.sh.
 #
-#   Terminal 1:  npm run educational   (or CACHE_TTL_SECONDS=5 npm run educational)
+#   Terminal 1:  npm run educational   (TTL 5 s and 400 ms origin delay by default)
 #   Terminal 2:  npm run educational:demo
 #
 # Start from a freshly started server: the data lives in memory and this script
@@ -74,7 +74,7 @@ if [[ -n "$ttl" && "$ttl" -le 15 ]]; then
   sleep $((ttl + 1))
   gql POST "$PROXY" "$BOOKS"
 else
-  echo "Entry is fresh for ${ttl:-?}s more. Restart with CACHE_TTL_SECONDS=5 npm run educational to watch it expire."
+  echo "Entry is fresh for ${ttl:-?}s more. Start the server with a TTL of 15 s or less (the default is 5 s) to watch it expire."
   printf '\n'
 fi
 
